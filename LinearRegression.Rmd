@@ -1,0 +1,246 @@
+---
+title: "NUS SDSS HACKATHON LINEAR REGRESSION MODEL AND CORR MATRIX"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(lm.beta)
+library(car)
+library(MASS)
+library(readr) 
+library(dplyr)
+library(openxlsx)
+library(lmtest)
+library(sandwich)
+library(ggcorrplot)
+```
+
+
+```{r read-dataset, echo=TRUE}
+df <- read.csv("Cleaned_insurance.csv")
+train <- read.csv("training_data.csv")
+test <- read.csv("testing_data.csv")
+```
+
+### Correlation matrix
+
+```{r correlation matrix, echo=TRUE}
+num_df <- df[sapply(df, is.numeric)]
+corr_matrix <- cor(num_df, use = "complete.obs")
+corr_matrix <- corr_matrix[ !(rownames(corr_matrix) %in% c("charges", "region_encoded")),
+                            !(colnames(corr_matrix) %in% c("charges", "region_encoded")) ]
+ggcorrplot(corr_matrix,
+           method = "square",
+           lab = TRUE,          
+           lab_size = 3,
+           colors = c("blue", "white", "red"),
+           title = "Correlation Heatmap for Cleaned_Insurance",
+           ggtheme = ggplot2::theme_minimal())
+
+```
+
+
+```{r base modellinear regression, echo=TRUE}
+
+# Fit the model on training data
+model <- lm(charges_log ~ age + bmi + children + sex_encoded + smoker_encoded + region_northeast + region_northwest + region_southeast, data = train)
+
+# Summary of model
+summary(model)
+```
+
+<p style="color:blue">
+age, bmi, children, smoker are highly significant predictors.
+
+sex_encoded is modestly significant (charges slightly lower for males).
+
+regionnortheast is borderline significant (p ≈ 0.05).
+
+Our regression model explains roughly 75–83% of the variance in log-transformed insurance charges, showing strong predictive accuracy and interpretability. Smoking is by far the dominant factor, increasing expected medical costs by nearly 4.6×. Age, BMI, and number of children also show consistent positive effects. Male policyholders and those in the Northeast region tend to have slightly higher charges.
+</p>
+
+```{r experimenting with potential interaction terms, echo=TRUE}
+
+# Start with your base model
+model_base <- lm(charges_log ~ age + bmi + children + sex_encoded + smoker_encoded +
+                               region_northeast + region_northwest + region_southeast,
+                 data = train)
+
+# Add BMI-Smoker interaction
+model_bmi_smoke <- lm(charges_log ~ age + bmi * smoker_encoded + children + sex_encoded +
+                                     region_northeast + region_northwest + region_southeast,
+                      data = train)
+
+# Compare model fit
+anova(model_base, model_bmi_smoke)
+
+# Then test Age-Smoker interaction
+model_age_smoke <- lm(charges_log ~ age * smoker_encoded + bmi + children + sex_encoded +
+                                      region_northeast + region_northwest + region_southeast,
+                      data = train)
+anova(model_base, model_age_smoke)
+
+model_age_bmi <- lm(charges_log ~ age * bmi + children + sex_encoded + smoker_encoded +
+                                   region_northeast + region_northwest + region_southeast,
+                    data = train)
+
+# Compare models
+anova(model_base, model_age_bmi)
+
+```
+<p style="color:blue">
+
+I chose to explore three specific interaction effects — bmi*smoker_encoded, age*smoker_encoded, and age*bmi — because they represent meaningful real-world relationships that likely influence medical costs in non-additive ways.
+
+First, the interaction between BMI and smoking (bmi*smoker_encoded) captures how two major health risk factors — obesity and smoking — can amplify each other’s impact. Medical research consistently shows that smokers with higher BMI face disproportionately greater risks of cardiovascular and respiratory diseases, which translates into much higher healthcare costs than would be expected from either factor alone. Hence, this interaction was expected to show a strong positive effect.
+
+Next, the interaction between age and smoking (age*smoker_encoded) reflects how the consequences of smoking often worsen with time. Older smokers typically experience accumulated health damage, such as chronic lung or heart conditions, that lead to significantly higher medical expenses. This interaction was expected to produce a positive effect, as the cost burden from smoking tends to rise with age.
+
+Finally, the interaction between age and BMI (age*bmi) was tested because aging and higher body mass index are both associated with chronic illnesses like hypertension and diabetes. The combination of being older and overweight could reasonably be expected to exert a moderate positive effect on medical costs, representing the compounding health risks these two factors create when present together.
+
+The Analysis of Variance (ANOVA) results show that introducing the interaction terms bmi*smoker_encoded and age*smoker_encoded significantly improved the model’s explanatory power, while the age*bmi interaction did not. 
+
+Specifically, for the bmi*smoker_encoded model, the F-statistic is 80.60 with a p-value of < 2.2e−16, indicating that the addition of this interaction explains a significant portion of variance beyond the main effects. 
+
+Similarly, the age*smoker_encoded interaction produces an even higher F-statistic of 202.7 and the same highly significant p-value (< 2.2e−16), confirming a strong interaction effect between smoking status and age. 
+
+In contrast, the age*bmi term yields an F-statistic of 0.9191 with a non-significant p-value (0.3379), suggesting it does not meaningfully enhance model fit. 
+
+Therefore, based on both the F-values and p-values, adding the bmi*smoker_encoded and age*smoker_encoded interactions significantly improves the model fit, while the age*bmi interaction should be excluded as it does not contribute explanatory value.
+</p>
+
+```{r crafting best linear regression model, echo=TRUE}
+# Fit the model
+model_combined <- lm(charges_log ~ age * smoker_encoded + bmi * smoker_encoded +
+                       children + sex_encoded +
+                       region_northeast + region_northwest + region_southeast,
+                     data = train)
+step_model <- stepAIC(model_combined, direction = "both", trace = FALSE)
+summary(step_model)
+```
+
+<p style="color:blue">
+The final regression model, refined through stepwise selection (AIC-based), demonstrates that systematically removing redundant predictors while retaining significant interaction terms improves both model simplicity and interpretability. The resulting model preserves the key interactions — age × smoker_encoded and bmi × smoker_encoded — as they contribute substantially to explaining variation in medical costs. With an Adjusted R² of 0.809, the model explains about 81% of the variation in logged medical charges, balancing strong explanatory power with parsimony.
+
+Both interaction effects remain highly significant (p < 2e−16), reinforcing the conclusion that smoking not only raises baseline healthcare costs but also modifies how age and BMI influence those costs. The negative age × smoker interaction (−0.034) suggests that smokers face high medical costs even at younger ages, with slower cost increases over time compared to non-smokers. In contrast, the positive BMI × smoker interaction (+0.054) indicates that heavier smokers face a steep compounding effect on expenses, as smoking magnifies the health risks associated with obesity.
+
+By leveraging stepwise selection, the model excludes weaker predictors and multicollinear variables, leading to a more efficient specification with a lower AIC and improved generalizability. Overall, this refined model provides a statistically robust and theoretically sound representation of how lifestyle factors such as age, BMI, and smoking interact to shape healthcare spending.
+</p>
+
+```{r testing prediction model, echo=TRUE}
+#Training predictions
+train_pred <- predict(step_model, newdata = train)
+
+#Test prediction
+test_pred <- predict(step_model, newdata = test)
+
+#Metrics for training data
+train_rmse <- sqrt(mean((train$charges_log - train_pred)^2))
+train_mae  <- mean(abs(train$charges_log - train_pred))
+train_r2   <- cor(train$charges_log, train_pred)^2
+
+#Metrics for test data
+test_rmse <- sqrt(mean((test$charges_log - test_pred)^2))
+test_mae  <- mean(abs(test$charges_log - test_pred))
+test_r2   <- cor(test$charges_log, test_pred)^2
+
+#Display results
+cat("Training Set Performance:\n")
+cat("RMSE:", round(train_rmse, 4), "\n")
+cat("MAE:", round(train_mae, 4), "\n")
+cat("R²:", round(train_r2, 4), "\n\n")
+
+cat("Test Set Performance:\n")
+cat("RMSE:", round(test_rmse, 4), "\n")
+cat("MAE:", round(test_mae, 4), "\n")
+cat("R²:", round(test_r2, 4), "\n")
+
+# Multiplicative error (for log scale)
+test_multiplicative_error <- exp(test_rmse) - 1
+cat("\nMultiplicative Error (≈±):", round(test_multiplicative_error * 100, 2), "%\n")
+```
+<p style="color:blue">
+On the training set, the model achieved an R² of 0.8109, indicating that it explains about 81% of the variation in medical charges. The RMSE of 0.3942 and MAE of 0.2151 suggest that, on average, the model’s log-charge predictions deviate only modestly from the true values — a sign of good fit without excessive overfitting.
+
+On the test set, performance remains consistent and even slightly improved, with an R² of 0.8719, RMSE of 0.346, and MAE of 0.2053. This close alignment between training and test metrics indicates that the model generalizes well to unseen data, confirming that the inclusion of key interaction terms (age × smoker, BMI × smoker) enhances predictive stability rather than introducing noise.
+
+The multiplicative error of approximately ±41% (derived from exponentiating RMSE) means that, on average, the model’s predictions of actual medical costs are expected to be within ±41% of the true values — a reasonable level of accuracy given the natural variability in healthcare spending.
+
+Overall, these results reflect a well-balanced model that captures meaningful nonlinear and interaction effects while maintaining excellent predictive reliability on new data.
+</p>
+
+```{r feature importance, echo=TRUE}
+# Standardized coefficients
+beta_fit <- lm.beta(step_model)
+
+coef_df <- tibble(
+  term          = names(coef(beta_fit)),
+  raw_estimate  = as.numeric(coef(beta_fit)),
+  std_estimate  = as.numeric(beta_fit$standardized.coefficients)
+) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    abs_std = abs(std_estimate),
+    direction = ifelse(std_estimate > 0, "Positive", "Negative")
+  )
+
+# Print top features by magnitude
+coef_df %>%
+  arrange(desc(abs_std)) %>%
+  print(n = Inf)
+
+# Plot standardized coefficients (absolute values with color-coded direction)
+ggplot(coef_df, aes(x = reorder(term, abs_std), y = abs_std, fill = direction)) +
+  geom_col() +
+  coord_flip() +
+  geom_text(aes(label = sprintf("%.2f", std_estimate)),
+            hjust = ifelse(coef_df$std_estimate > 0, -0.1, 1.1),
+            color = "black", size = 3) +
+  labs(title = "Feature Impact (Standardized Coefficients)",
+       x = "Predictor",
+       y = "Standardized Effect (|β|)",
+       fill = "Effect Direction") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+<p style="color:blue">
+The standardized coefficients reveal that smoking-related factors dominate the model’s predictive power for medical charges. The strongest driver is the interaction between smoking and BMI (β = +0.74), indicating that smoking significantly amplifies the cost impact of higher BMI — heavier smokers face disproportionately greater healthcare expenses. Age also exerts a strong positive influence (β = +0.64), reflecting the natural rise in medical costs with aging. Conversely, the age–smoker interaction (β = –0.62) suggests that while non-smokers’ costs increase steadily with age, smokers already incur high costs earlier in life, so the incremental effect of aging is smaller. The main effect of smoking (β = +0.53) remains substantial, reaffirming its consistent association with higher healthcare spending. Other predictors such as the number of children (β = +0.14), gender (β = +0.05), and regional indicators (β = +0.04–0.06) have comparatively minor effects, while BMI alone becomes negligible once its interaction with smoking is considered. Overall, the model highlights that health risk behaviors (like smoking) far outweigh demographic characteristics in explaining medical cost variability, underscoring the economic burden of lifestyle choices on healthcare systems.
+</p>
+
+```{r fairness analysis, echo=TRUE}
+#Predictions & residuals on TEST set (log scale)
+test <- test %>%
+  mutate(
+    predicted = predict(step_model, newdata = test),
+    residual  = charges_log - predicted   # + = underpredicted; - = overpredicted
+  )
+
+#Function to compute fairness metrics for any grouping var
+fairness_summary <- function(data, group_var) {
+  data %>%
+    group_by({{ group_var }}) %>%
+    summarise(
+      n = n(),
+      mean_residual = mean(residual),
+      mae  = mean(abs(residual)),
+      rmse = sqrt(mean(residual^2)),
+      .groups = "drop"
+    ) %>%
+    arrange({{ group_var }})
+}
+
+#Tables: Gender & Region
+fair_gender <- fairness_summary(test, sex_encoded)
+fair_region <- fairness_summary(test, region)
+
+cat("=== Fairness by Gender ===\n"); print(fair_gender)
+cat("\n=== Fairness by Region ===\n"); print(fair_region)
+```
+
+<p style="color:blue">
+To assess fairness, prediction residuals were compared across gender and region groups using mean residuals, MAE, and RMSE.
+Across gender, both males and females show nearly identical mean residuals (≈ –0.02) and very close MAE (0.19–0.22) and RMSE (0.33–0.36) values. This indicates that the model predicts medical costs equally accurately and without systematic bias for both genders. In other words, neither group is consistently over- nor under-predicted, suggesting strong fairness in gender representation.
+
+For region, mean residuals ranged from –0.06 to +0.08, implying minimal bias overall. However, the Northeast region exhibits slightly higher MAE (0.25) and RMSE (0.44), suggesting modestly higher prediction error variance compared to other regions. This may reflect underlying socioeconomic or pricing differences not captured by the model rather than structural bias.
+</p>
