@@ -53,3 +53,41 @@ Run the `splitdata.py` script to generate the `training_data.csv` and `testing_d
 
 ```bash
 python splitdata.py
+```
+
+3. . Running the Models
+You can now explore the different modeling approaches:
+
+Linear Regression (R): Open and run the hack.Rmd file in an R environment (like RStudio).
+
+Random Forest (Python): Open and run the randomtree.ipynb notebook using Jupyter.
+
+XGBoost (Python): Open and run the xgbregressor.ipynb notebook using Jupyter.
+
+📖 Models & Analysis
+This project implements and compares three different regression models.
+
+1. Baseline: Linear Regression (in hack.Rmd)
+Goal: Establish a baseline performance metric.
+
+Method: A multiple linear regression model (lm) was built in R to predict the log of insurance charges.
+
+Findings: Identified age, bmi, children, and smoker status as highly significant linear predictors.
+
+2. Advanced: Random Forest (in randomtree.ipynb)
+Goal: Improve upon the baseline using a non-linear ensemble method.
+
+Method: Implemented RandomForestRegressor from scikit-learn.
+
+Analysis: Includes hyperparameter tuning (GridSearchCV) and a fairness analysis that breaks down model error metrics by sex and region.
+
+3. Advanced: XGBoost (in xgbregressor.ipynb)
+Goal: Achieve high predictive accuracy using a gradient-boosting algorithm.
+
+Method: Implemented XGBRegressor and used GridSearchCV for hyperparameter tuning.
+
+Analysis:
+
+Feature Importance: Uses SHAP (SHapley Additive exPlanations) to provide clear, visual explanations of which features have the most impact on predictions.
+
+Fairness Check: Performs a detailed group error analysis to check for disparities in RMSE and MAE across different regions, fulfilling a key requirement of the datathon.
